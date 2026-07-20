@@ -654,7 +654,7 @@ Os seguintes cenários foram validados:
 - [x] Envio de relatório por e-mail
 - [x] Infraestrutura como código
 - [x] Monitoramento por CloudWatch
-- [ ] Pipeline CI/CD
+- [x] Pipeline CI/CD
 - [ ] Testes automatizados
 - [ ] Diagrama exportado como imagem
 
