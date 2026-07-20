@@ -1,0 +1,22 @@
+# AWS SAM
+.aws-sam/
+
+# Maven
+**/target/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+out/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Variáveis e arquivos locais
+.env
+.env.*
+*.local

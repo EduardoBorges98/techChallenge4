@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Plataforma serverless para recebimento e análise de avaliações.
+
+Globals:
+  Function:
+    Runtime: java21
+    Architectures:
+      - x86_64
+    Timeout: 30
+    MemorySize: 1024
+
+    LoggingConfig:
+      LogFormat: JSON
+
+Resources:
+
+  ReceberAvaliacaoFunction:
+    Type: AWS::Serverless::Function
+
+    Properties:
+      FunctionName: feedback-receber-avaliacao
+
+      CodeUri: ReceberAvaliacaoFunction
+
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+
+      Environment:
+        Variables:
+          MAIN_CLASS: br.com.techchallenge.feedback.FeedbackApplication
+          SPRING_CLOUD_FUNCTION_DEFINITION: receberAvaliacao
+
+      Events:
+        ReceberAvaliacaoApi:
+          Type: Api
+          Properties:
+            Path: /avaliacoes
+            Method: post
+
+Outputs:
+
+  AvaliacaoApiUrl:
+    Description: Endpoint para envio de avaliações
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/avaliacoes"
+
+  ReceberAvaliacaoFunctionArn:
+    Description: ARN da função responsável pelo recebimento das avaliações
+    Value: !GetAtt ReceberAvaliacaoFunction.Arn
+
+  ReceberAvaliacaoFunctionIamRoleArn:
+    Description: ARN da função IAM criada para a Lambda
+    Value: !GetAtt ReceberAvaliacaoFunctionRole.Arn
