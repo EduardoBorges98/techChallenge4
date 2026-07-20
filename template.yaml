@@ -122,6 +122,46 @@ Resources:
             Schedule: cron(0 12 ? * MON *)
             Enabled: true
 
+  ReceberAvaliacaoErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: feedback-receber-avaliacao-errors
+      AlarmDescription: Alarme para erros na função de recebimento de avaliações
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ReceberAvaliacaoFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AvaliacoesCriticasTopic
+
+  GerarRelatorioErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: feedback-gerar-relatorio-errors
+      AlarmDescription: Alarme para erros na função de geração de relatórios
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref GerarRelatorioFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AvaliacoesCriticasTopic
+
 Outputs:
 
   AvaliacaoApiUrl:
@@ -147,3 +187,11 @@ Outputs:
   GerarRelatorioFunctionArn:
     Description: ARN da função de geração de relatórios
     Value: !GetAtt GerarRelatorioFunction.Arn
+
+  ReceberAvaliacaoErrorsAlarmName:
+    Description: Alarme de erros da função de recebimento
+    Value: !Ref ReceberAvaliacaoErrorsAlarm
+
+  GerarRelatorioErrorsAlarmName:
+    Description: Alarme de erros da função de relatório
+    Value: !Ref GerarRelatorioErrorsAlarm
