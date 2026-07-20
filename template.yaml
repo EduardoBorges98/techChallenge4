@@ -48,6 +48,19 @@ Resources:
       Endpoint: !Ref AdminEmail
       TopicArn: !Ref AvaliacoesCriticasTopic
 
+  RelatoriosBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
   ReceberAvaliacaoFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -76,6 +89,39 @@ Resources:
             Path: /avaliacoes
             Method: post
 
+  GerarRelatorioFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: feedback-gerar-relatorio
+      CodeUri: GerarRelatorioFunction
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+
+      Environment:
+        Variables:
+          MAIN_CLASS: br.com.techchallenge.feedback.relatorio.RelatorioApplication
+          SPRING_CLOUD_FUNCTION_DEFINITION: gerarRelatorio
+          AVALIACOES_TABLE_NAME: !Ref AvaliacoesTable
+          RELATORIOS_BUCKET_NAME: !Ref RelatoriosBucket
+          SNS_TOPIC_ARN: !Ref AvaliacoesCriticasTopic
+
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AvaliacoesTable
+
+        - S3WritePolicy:
+            BucketName: !Ref RelatoriosBucket
+
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AvaliacoesCriticasTopic.TopicName
+
+      Events:
+        RelatorioSemanal:
+          Type: Schedule
+          Properties:
+            Description: Gera o relatório semanal de avaliações
+            Schedule: cron(0 12 ? * MON *)
+            Enabled: true
+
 Outputs:
 
   AvaliacaoApiUrl:
@@ -90,6 +136,14 @@ Outputs:
     Description: ARN do tópico de alertas críticos
     Value: !Ref AvaliacoesCriticasTopic
 
+  RelatoriosBucketName:
+    Description: Bucket onde os relatórios são armazenados
+    Value: !Ref RelatoriosBucket
+
   ReceberAvaliacaoFunctionArn:
     Description: ARN da função de recebimento
     Value: !GetAtt ReceberAvaliacaoFunction.Arn
+
+  GerarRelatorioFunctionArn:
+    Description: ARN da função de geração de relatórios
+    Value: !GetAtt GerarRelatorioFunction.Arn
