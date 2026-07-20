@@ -11,26 +11,41 @@ Globals:
       - x86_64
     Timeout: 30
     MemorySize: 1024
-
     LoggingConfig:
       LogFormat: JSON
 
 Resources:
 
+  AvaliacoesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: feedback-avaliacoes
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
   ReceberAvaliacaoFunction:
     Type: AWS::Serverless::Function
-
     Properties:
       FunctionName: feedback-receber-avaliacao
-
       CodeUri: ReceberAvaliacaoFunction
-
       Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
 
       Environment:
         Variables:
           MAIN_CLASS: br.com.techchallenge.feedback.FeedbackApplication
           SPRING_CLOUD_FUNCTION_DEFINITION: receberAvaliacao
+          AVALIACOES_TABLE_NAME: !Ref AvaliacoesTable
+
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref AvaliacoesTable
 
       Events:
         ReceberAvaliacaoApi:
@@ -45,10 +60,10 @@ Outputs:
     Description: Endpoint para envio de avaliações
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/avaliacoes"
 
-  ReceberAvaliacaoFunctionArn:
-    Description: ARN da função responsável pelo recebimento das avaliações
-    Value: !GetAtt ReceberAvaliacaoFunction.Arn
+  AvaliacoesTableName:
+    Description: Nome da tabela de avaliações
+    Value: !Ref AvaliacoesTable
 
-  ReceberAvaliacaoFunctionIamRoleArn:
-    Description: ARN da função IAM criada para a Lambda
-    Value: !GetAtt ReceberAvaliacaoFunctionRole.Arn
+  ReceberAvaliacaoFunctionArn:
+    Description: ARN da função de recebimento
+    Value: !GetAtt ReceberAvaliacaoFunction.Arn

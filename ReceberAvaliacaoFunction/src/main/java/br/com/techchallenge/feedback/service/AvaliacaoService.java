@@ -3,6 +3,7 @@ package br.com.techchallenge.feedback.service;
 import br.com.techchallenge.feedback.domain.Urgencia;
 import br.com.techchallenge.feedback.dto.AvaliacaoRequest;
 import br.com.techchallenge.feedback.dto.AvaliacaoResponse;
+import br.com.techchallenge.feedback.repository.AvaliacaoRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -12,18 +13,28 @@ import java.util.UUID;
 @Service
 public class AvaliacaoService {
 
+    private final AvaliacaoRepository repository;
+
+    public AvaliacaoService(AvaliacaoRepository repository) {
+        this.repository = repository;
+    }
+
     public AvaliacaoResponse receber(AvaliacaoRequest request) {
         validar(request);
 
         Urgencia urgencia = Urgencia.calcular(request.nota());
 
-        return new AvaliacaoResponse(
+        AvaliacaoResponse response = new AvaliacaoResponse(
                 UUID.randomUUID().toString(),
                 request.descricao(),
                 request.nota(),
                 urgencia.name(),
                 OffsetDateTime.now(ZoneOffset.UTC)
         );
+
+        repository.salvar(response);
+
+        return response;
     }
 
     private void validar(AvaliacaoRequest request) {
