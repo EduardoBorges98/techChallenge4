@@ -1,0 +1,60 @@
+name: Deploy AWS SAM
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: |
+            ReceberAvaliacaoFunction/pom.xml
+            GerarRelatorioFunction/pom.xml
+
+      - name: Configurar credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Instalar AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Verificar identidade AWS
+        run: aws sts get-caller-identity
+
+      - name: Validar template
+        run: sam validate
+
+      - name: Compilar aplicação
+        run: sam build
+
+      - name: Fazer deploy
+        run: >
+          sam deploy
+          --stack-name feedback-serverless
+          --region "${{ secrets.AWS_REGION }}"
+          --capabilities CAPABILITY_IAM
+          --resolve-s3
+          --parameter-overrides AdminEmail="${{ secrets.ADMIN_EMAIL }}"
+          --no-confirm-changeset
+          --no-fail-on-empty-changeset
