@@ -4,6 +4,12 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   Plataforma serverless para recebimento e análise de avaliações.
 
+Parameters:
+  AdminEmail:
+    Type: String
+    Description: Email que receberá alertas de avaliações críticas
+    NoEcho: true
+
 Globals:
   Function:
     Runtime: java21
@@ -30,6 +36,18 @@ Resources:
       SSESpecification:
         SSEEnabled: true
 
+  AvaliacoesCriticasTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: feedback-avaliacoes-criticas
+
+  AvaliacoesCriticasEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      Endpoint: !Ref AdminEmail
+      TopicArn: !Ref AvaliacoesCriticasTopic
+
   ReceberAvaliacaoFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -42,10 +60,14 @@ Resources:
           MAIN_CLASS: br.com.techchallenge.feedback.FeedbackApplication
           SPRING_CLOUD_FUNCTION_DEFINITION: receberAvaliacao
           AVALIACOES_TABLE_NAME: !Ref AvaliacoesTable
+          SNS_TOPIC_ARN: !Ref AvaliacoesCriticasTopic
 
       Policies:
         - DynamoDBWritePolicy:
             TableName: !Ref AvaliacoesTable
+
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AvaliacoesCriticasTopic.TopicName
 
       Events:
         ReceberAvaliacaoApi:
@@ -63,6 +85,10 @@ Outputs:
   AvaliacoesTableName:
     Description: Nome da tabela de avaliações
     Value: !Ref AvaliacoesTable
+
+  AvaliacoesCriticasTopicArn:
+    Description: ARN do tópico de alertas críticos
+    Value: !Ref AvaliacoesCriticasTopic
 
   ReceberAvaliacaoFunctionArn:
     Description: ARN da função de recebimento

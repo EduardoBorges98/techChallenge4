@@ -14,9 +14,14 @@ import java.util.UUID;
 public class AvaliacaoService {
 
     private final AvaliacaoRepository repository;
+    private final NotificacaoService notificacaoService;
 
-    public AvaliacaoService(AvaliacaoRepository repository) {
+    public AvaliacaoService(
+            AvaliacaoRepository repository,
+            NotificacaoService notificacaoService
+    ) {
         this.repository = repository;
+        this.notificacaoService = notificacaoService;
     }
 
     public AvaliacaoResponse receber(AvaliacaoRequest request) {
@@ -33,6 +38,10 @@ public class AvaliacaoService {
         );
 
         repository.salvar(response);
+
+        if (urgencia == Urgencia.CRITICA) {
+            notificacaoService.enviarAlertaCritico(response);
+        }
 
         return response;
     }
@@ -51,7 +60,9 @@ public class AvaliacaoService {
         }
 
         if (request.nota() < 0 || request.nota() > 10) {
-            throw new IllegalArgumentException("A nota deve estar entre 0 e 10");
+            throw new IllegalArgumentException(
+                    "A nota deve estar entre 0 e 10"
+            );
         }
     }
 }
