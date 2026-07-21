@@ -2,7 +2,7 @@
 
 Projeto desenvolvido para recebimento, classificação, armazenamento e análise de avaliações utilizando uma arquitetura serverless na AWS.
 
-A solução expõe uma API para envio de avaliações, classifica automaticamente a urgência com base na nota, persiste os dados no DynamoDB, envia alertas por e-mail para avaliações críticas e gera relatórios semanais armazenados no Amazon S3.
+A solução expõe uma API protegida por API Key para envio de avaliações, classifica automaticamente a urgência com base na nota, persiste os dados no DynamoDB, envia alertas por e-mail para avaliações críticas e gera relatórios semanais armazenados no Amazon S3.
 
 ## Sumário
 
@@ -57,7 +57,7 @@ flowchart LR
     S3[(Amazon S3)]
     CloudWatch[Amazon CloudWatch Logs]
 
-    Cliente -->|POST /avaliacoes| APIGW
+    Cliente -->|POST /avaliacao ou /avaliacoes<br/>x-api-key obrigatória| APIGW
     APIGW --> LambdaReceber
     LambdaReceber --> DynamoDB
     LambdaReceber -->|avaliação crítica| SNS
@@ -166,6 +166,7 @@ feedback-serverless/
 │                   ├── config/
 │                   │   └── AwsConfig.java
 │                   ├── dto/
+│                   │   ├── AvaliacaoDetalhe.java
 │                   │   └── RelatorioResumo.java
 │                   ├── repository/
 │                   │   └── AvaliacaoRepository.java
@@ -183,17 +184,51 @@ feedback-serverless/
 
 ### Enviar avaliação
 
+A API disponibiliza duas rotas `POST`, ambas apontando para a mesma função Lambda:
+
 ```http
+POST /avaliacao
 POST /avaliacoes
 ```
 
-### URL publicada
+A rota `/avaliacao` mantém aderência ao enunciado. A rota `/avaliacoes` permanece disponível por compatibilidade.
 
-```text
-https://3y3v7qb9oa.execute-api.sa-east-1.amazonaws.com/Prod/avaliacoes
+### URLs publicadas
+
+O ID da API é gerado pelo CloudFormation. Para descobrir as URLs:
+
+```powershell
+aws cloudformation describe-stacks --stack-name feedback-serverless --region sa-east-1 --query "Stacks[0].Outputs[?OutputKey=='AvaliacaoApiUrl' || OutputKey=='AvaliacaoApiAlternativaUrl'].[OutputKey,OutputValue]" --output table
 ```
 
-> A URL acima corresponde ao ambiente atualmente publicado na região `sa-east-1`.
+Formato:
+
+```text
+https://SEU_API_ID.execute-api.sa-east-1.amazonaws.com/Prod/avaliacao
+https://SEU_API_ID.execute-api.sa-east-1.amazonaws.com/Prod/avaliacoes
+```
+
+### Autenticação
+
+As duas rotas exigem API Key no cabeçalho:
+
+```http
+x-api-key: SUA_API_KEY
+```
+
+Chamadas sem chave retornam:
+
+```text
+403 Forbidden
+```
+
+A API Key é criada pelo AWS SAM junto com um Usage Plan. Ela não deve ser armazenada no repositório, no README ou em logs públicos.
+
+Para localizar a chave criada:
+
+```powershell
+aws apigateway get-api-keys --include-values --region sa-east-1
+```
 
 ### Corpo da requisição
 
@@ -202,6 +237,12 @@ https://3y3v7qb9oa.execute-api.sa-east-1.amazonaws.com/Prod/avaliacoes
   "descricao": "A aula apresentou falha no áudio",
   "nota": 2
 }
+```
+
+### Exemplo de chamada com PowerShell
+
+```powershell
+$apiId=(aws apigateway get-rest-apis --region sa-east-1 --query "items[?name=='feedback-serverless-api'].id | [0]" --output text); $apiKey=(aws apigateway get-api-keys --include-values --region sa-east-1 --query "items[?contains(stageKeys, '$apiId/Prod')].value | [0]" --output text); Invoke-RestMethod -Uri "https://$apiId.execute-api.sa-east-1.amazonaws.com/Prod/avaliacao" -Method Post -Headers @{"x-api-key"=$apiKey} -ContentType "application/json" -Body (@{descricao="Teste com API Key";nota=5} | ConvertTo-Json)
 ```
 
 ### Resposta esperada
@@ -259,10 +300,12 @@ feedback-receber-avaliacao
 Responsável por:
 
 - ser acionada periodicamente pelo EventBridge;
-- consultar as avaliações no DynamoDB;
+- consultar as avaliações dos últimos sete dias no DynamoDB;
 - calcular o total de avaliações;
 - calcular a média das notas;
 - contar avaliações críticas, médias e baixas;
+- agrupar a quantidade de avaliações por dia;
+- listar descrição, nota, urgência e data de envio de cada avaliação;
 - gerar um arquivo `.txt`;
 - salvar o relatório no S3;
 - publicar o resumo no SNS.
@@ -279,7 +322,7 @@ A stack cria os seguintes recursos:
 
 | Recurso | Finalidade |
 |---|---|
-| API Gateway | Expor o endpoint HTTP |
+| API Gateway | Expor os endpoints HTTP protegidos por API Key |
 | Lambda de recebimento | Processar e salvar avaliações |
 | Lambda de relatório | Consolidar os dados periodicamente |
 | DynamoDB | Armazenar as avaliações |
@@ -338,7 +381,7 @@ relatorios/
 Exemplo:
 
 ```text
-relatorios/relatorio-2026-07-20.txt
+relatorios/relatorio-semanal-2026-07-21.txt
 ```
 
 ## Pré-requisitos
@@ -388,13 +431,13 @@ sam local start-api
 A API ficará disponível em:
 
 ```text
-http://127.0.0.1:3000/avaliacoes
+http://127.0.0.1:3000/avaliacao
 ```
 
 ### Teste local com PowerShell
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:3000/avaliacoes" -ContentType "application/json; charset=utf-8" -Body (@{descricao="Teste local";nota=2} | ConvertTo-Json -Compress)
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:3000/avaliacao" -ContentType "application/json; charset=utf-8" -Body (@{descricao="Teste local";nota=2} | ConvertTo-Json -Compress)
 ```
 
 > Para persistência real no DynamoDB e publicação no SNS, a função deve estar implantada na AWS ou receber credenciais e variáveis de ambiente válidas.
@@ -444,39 +487,48 @@ Confirm subscription
 
 Sem essa confirmação, os e-mails de alerta e relatório não serão entregues.
 
+### Deploy automatizado com GitHub Actions
+
+O arquivo `.github/workflows/deploy.yml` executa checkout, configuração do Java 21, configuração das credenciais AWS, instalação do SAM CLI, validação, compilação e deploy.
+
+O pipeline roda em pushes para a branch `main` e também pode ser iniciado manualmente.
+
+Segredos configurados no GitHub:
+
+```text
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_REGION
+ADMIN_EMAIL
+```
+
 ## Testes
 
-### Testar avaliação crítica
+### Verificar bloqueio sem API Key
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "https://3y3v7qb9oa.execute-api.sa-east-1.amazonaws.com/Prod/avaliacoes" -ContentType "application/json; charset=utf-8" -Body (@{descricao="Sistema indisponível durante a aula";nota=1} | ConvertTo-Json -Compress)
+$apiId=(aws apigateway get-rest-apis --region sa-east-1 --query "items[?name=='feedback-serverless-api'].id | [0]" --output text); try { Invoke-WebRequest -Uri "https://$apiId.execute-api.sa-east-1.amazonaws.com/Prod/avaliacao" -Method Post -ContentType "application/json" -Body (@{descricao="Teste sem chave";nota=5} | ConvertTo-Json) } catch { [int]$_.Exception.Response.StatusCode }
 ```
 
 Resultado esperado:
 
 ```text
-urgencia : CRITICA
+403
 ```
 
-Também deve ser enviado um e-mail com assunto semelhante a:
-
-```text
-Alerta de avaliação crítica
-```
-
-### Testar avaliação baixa
+### Testar avaliação com API Key
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "https://3y3v7qb9oa.execute-api.sa-east-1.amazonaws.com/Prod/avaliacoes" -ContentType "application/json; charset=utf-8" -Body (@{descricao="A aula foi muito boa";nota=9} | ConvertTo-Json -Compress)
+$apiId=(aws apigateway get-rest-apis --region sa-east-1 --query "items[?name=='feedback-serverless-api'].id | [0]" --output text); $apiKey=(aws apigateway get-api-keys --include-values --region sa-east-1 --query "items[?contains(stageKeys, '$apiId/Prod')].value | [0]" --output text); Invoke-RestMethod -Uri "https://$apiId.execute-api.sa-east-1.amazonaws.com/Prod/avaliacao" -Method Post -Headers @{"x-api-key"=$apiKey} -ContentType "application/json" -Body (@{descricao="Teste com API Key";nota=5} | ConvertTo-Json)
 ```
 
 Resultado esperado:
 
 ```text
-urgencia : BAIXA
+urgencia : MEDIA
 ```
 
-Essa avaliação deve ser salva no DynamoDB, mas não deve gerar alerta crítico.
+Para testar alerta crítico, use nota `1`. Para testar urgência baixa, use nota `9`.
 
 ### Verificar o DynamoDB
 
@@ -486,7 +538,7 @@ aws dynamodb scan --table-name feedback-avaliacoes --region sa-east-1
 
 ## Relatório semanal
 
-A função de relatório é executada automaticamente pelo EventBridge.
+A função de relatório é executada automaticamente pelo EventBridge e considera somente as avaliações enviadas nos últimos sete dias.
 
 Agendamento configurado:
 
@@ -533,22 +585,35 @@ aws s3 ls s3://SEU_BUCKET/relatorios/ --region sa-east-1
 ### Baixar um relatório
 
 ```bash
-aws s3 cp s3://SEU_BUCKET/relatorios/relatorio-AAAA-MM-DD.txt . --region sa-east-1
+aws s3 cp s3://SEU_BUCKET/relatorios/relatorio-semanal-AAAA-MM-DD.txt . --region sa-east-1
 ```
 
 ### Exemplo de relatório
 
 ```text
-RELATÓRIO DE AVALIAÇÕES
+RELATÓRIO SEMANAL DE AVALIAÇÕES
 
-Data de geração: 2026-07-20T23:16:39Z
-Total de avaliações: 4
-Média das notas: 3.25
+Período: 2026-07-14T01:02:12Z até 2026-07-21T01:02:12Z
+Data de geração: 2026-07-21T01:02:12Z
+Total de avaliações: 5
+Média das notas: 3,60
 
-Distribuição por urgência:
+QUANTIDADE POR URGÊNCIA
 - Críticas: 3
-- Médias: 0
+- Médias: 1
 - Baixas: 1
+
+QUANTIDADE DE AVALIAÇÕES POR DIA
+- 2026-07-20: 4
+- 2026-07-21: 1
+
+DETALHES DAS AVALIAÇÕES
+
+------------------------------
+Descrição: A aula apresentou falha no áudio
+Nota: 2
+Urgência: CRITICA
+Data de envio: 2026-07-20T22:43:06Z
 ```
 
 ## Monitoramento
@@ -574,6 +639,15 @@ aws logs tail /aws/lambda/feedback-receber-avaliacao --since 10m --region sa-eas
 aws logs tail /aws/lambda/feedback-gerar-relatorio --since 10m --region sa-east-1
 ```
 
+### Alarmes configurados
+
+```text
+feedback-receber-avaliacao-errors
+feedback-gerar-relatorio-errors
+```
+
+Os alarmes monitoram a métrica `Errors` das duas funções Lambda e publicam no tópico SNS quando o limite é atingido.
+
 ### Métricas relevantes
 
 No CloudWatch podem ser acompanhadas:
@@ -591,6 +665,8 @@ No CloudWatch podem ser acompanhadas:
 
 A solução utiliza as seguintes medidas:
 
+- autenticação por API Key no API Gateway;
+- Usage Plan com limite mensal e controle de taxa;
 - criptografia em repouso no DynamoDB;
 - criptografia AES-256 no bucket S3;
 - bloqueio de acesso público no bucket;
@@ -608,6 +684,8 @@ A solução utiliza as seguintes medidas:
 Os seguintes cenários foram validados:
 
 - publicação da API no API Gateway;
+- bloqueio de requisições sem API Key com resposta `403`;
+- requisições autenticadas com API Key;
 - execução da Lambda Java 21;
 - gravação das avaliações no DynamoDB;
 - classificação de urgência;
@@ -616,25 +694,25 @@ Os seguintes cenários foram validados:
 - execução manual da função de relatório;
 - leitura dos dados do DynamoDB;
 - cálculo da média e distribuição;
+- agrupamento da quantidade de avaliações por dia;
+- listagem dos detalhes individuais das avaliações;
 - geração do arquivo de relatório;
 - armazenamento no S3;
 - envio do relatório por e-mail;
-- logs disponíveis no CloudWatch.
+- logs disponíveis no CloudWatch;
+- alarmes de erro configurados no CloudWatch;
+- pipeline de deploy validado no GitHub Actions.
 
 ## Possíveis melhorias
 
-- adicionar autenticação no API Gateway;
 - utilizar Cognito ou JWT;
 - criar uma API para consultar avaliações;
 - substituir `Scan` por uma estratégia mais eficiente;
 - adicionar paginação na leitura do DynamoDB;
-- filtrar apenas avaliações da semana;
 - criar tópicos SNS separados para alertas e relatórios;
 - gerar relatório em JSON, CSV ou PDF;
 - adicionar testes unitários;
 - adicionar testes de integração;
-- criar pipeline CI/CD no GitHub Actions;
-- configurar alarmes no CloudWatch;
 - adicionar Dead Letter Queue;
 - adicionar idempotência;
 - adicionar tracing com AWS X-Ray;
@@ -645,15 +723,21 @@ Os seguintes cenários foram validados:
 ## Status do projeto
 
 - [x] API publicada
+- [x] API protegida por API Key
+- [x] Rotas `/avaliacao` e `/avaliacoes`
 - [x] Persistência no DynamoDB
 - [x] Classificação de urgência
 - [x] Alertas críticos por SNS
 - [x] Segunda função serverless
 - [x] Relatório periódico
+- [x] Relatório limitado aos últimos sete dias
+- [x] Quantidade de avaliações por dia
+- [x] Detalhes individuais das avaliações
 - [x] Armazenamento no S3
 - [x] Envio de relatório por e-mail
 - [x] Infraestrutura como código
 - [x] Monitoramento por CloudWatch
+- [x] Alarmes de erro das Lambdas
 - [x] Pipeline CI/CD
 - [ ] Testes automatizados
 - [ ] Diagrama exportado como imagem
