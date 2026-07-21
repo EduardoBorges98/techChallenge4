@@ -1,5 +1,6 @@
 package br.com.techchallenge.feedback.relatorio.service;
 
+import br.com.techchallenge.feedback.relatorio.dto.AvaliacaoDetalhe;
 import br.com.techchallenge.feedback.relatorio.dto.RelatorioResumo;
 import br.com.techchallenge.feedback.relatorio.repository.AvaliacaoRepository;
 import org.springframework.stereotype.Service;
@@ -11,10 +12,14 @@ import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 @Service
 public class RelatorioService {
@@ -40,10 +45,10 @@ public class RelatorioService {
     }
 
     public void gerar() {
-        List<Map<String, AttributeValue>> avaliacoes =
+        List<Map<String, AttributeValue>> itens =
                 avaliacaoRepository.listarTodas();
 
-        RelatorioResumo resumo = calcularResumo(avaliacoes);
+        RelatorioResumo resumo = calcularResumo(itens);
         String relatorio = montarRelatorio(resumo);
         String nomeArquivo = montarNomeArquivo(resumo.dataGeracao());
 
@@ -52,14 +57,25 @@ public class RelatorioService {
     }
 
     private RelatorioResumo calcularResumo(
-            List<Map<String, AttributeValue>> avaliacoes
+            List<Map<String, AttributeValue>> itens
     ) {
+        OffsetDateTime dataGeracao = OffsetDateTime.now(ZoneOffset.UTC);
+        OffsetDateTime inicioPeriodo = dataGeracao.minusDays(7);
+
+        List<AvaliacaoDetalhe> avaliacoes = itens.stream()
+                .map(this::converterAvaliacao)
+                .filter(avaliacao -> avaliacao.dataEnvio() != null)
+                .filter(avaliacao ->
+                        !avaliacao.dataEnvio().isBefore(inicioPeriodo)
+                                && !avaliacao.dataEnvio().isAfter(dataGeracao)
+                )
+                .sorted(Comparator.comparing(AvaliacaoDetalhe::dataEnvio))
+                .toList();
+
         int total = avaliacoes.size();
 
         double media = avaliacoes.stream()
-                .map(item -> item.get("nota"))
-                .filter(valor -> valor != null && valor.n() != null)
-                .mapToInt(valor -> Integer.parseInt(valor.n()))
+                .mapToInt(AvaliacaoDetalhe::nota)
                 .average()
                 .orElse(0.0);
 
@@ -67,53 +83,178 @@ public class RelatorioService {
         long medias = contarPorUrgencia(avaliacoes, "MEDIA");
         long baixas = contarPorUrgencia(avaliacoes, "BAIXA");
 
+        Map<LocalDate, Long> quantidadePorDia = avaliacoes.stream()
+                .collect(Collectors.groupingBy(
+                        avaliacao -> avaliacao.dataEnvio().toLocalDate(),
+                        TreeMap::new,
+                        Collectors.counting()
+                ));
+
         return new RelatorioResumo(
-                OffsetDateTime.now(ZoneOffset.UTC),
+                dataGeracao,
                 total,
                 media,
                 criticas,
                 medias,
-                baixas
+                baixas,
+                quantidadePorDia,
+                avaliacoes
         );
     }
 
+    private AvaliacaoDetalhe converterAvaliacao(
+            Map<String, AttributeValue> item
+    ) {
+        String descricao = lerTexto(item, "descricao");
+        String urgencia = lerTexto(item, "urgencia");
+        int nota = lerNumero(item, "nota");
+        OffsetDateTime dataEnvio = lerData(item, "dataEnvio");
+
+        return new AvaliacaoDetalhe(
+                descricao,
+                nota,
+                urgencia,
+                dataEnvio
+        );
+    }
+
+    private String lerTexto(
+            Map<String, AttributeValue> item,
+            String atributo
+    ) {
+        AttributeValue valor = item.get(atributo);
+
+        if (valor == null || valor.s() == null) {
+            return "";
+        }
+
+        return valor.s();
+    }
+
+    private int lerNumero(
+            Map<String, AttributeValue> item,
+            String atributo
+    ) {
+        AttributeValue valor = item.get(atributo);
+
+        if (valor == null || valor.n() == null) {
+            return 0;
+        }
+
+        return Integer.parseInt(valor.n());
+    }
+
+    private OffsetDateTime lerData(
+            Map<String, AttributeValue> item,
+            String atributo
+    ) {
+        AttributeValue valor = item.get(atributo);
+
+        if (valor == null || valor.s() == null || valor.s().isBlank()) {
+            return null;
+        }
+
+        try {
+            return OffsetDateTime.parse(valor.s());
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
     private long contarPorUrgencia(
-            List<Map<String, AttributeValue>> avaliacoes,
+            List<AvaliacaoDetalhe> avaliacoes,
             String urgencia
     ) {
         return avaliacoes.stream()
-                .map(item -> item.get("urgencia"))
-                .filter(valor -> valor != null && valor.s() != null)
-                .filter(valor -> urgencia.equals(valor.s()))
+                .filter(avaliacao ->
+                        urgencia.equals(avaliacao.urgencia())
+                )
                 .count();
     }
 
     private String montarRelatorio(RelatorioResumo resumo) {
-        return """
-                RELATÓRIO DE AVALIAÇÕES
+        StringBuilder relatorio = new StringBuilder();
 
-                Data de geração: %s
-                Total de avaliações: %d
-                Média das notas: %.2f
+        relatorio.append("RELATÓRIO SEMANAL DE AVALIAÇÕES\n\n");
 
-                Distribuição por urgência:
-                - Críticas: %d
-                - Médias: %d
-                - Baixas: %d
-                """.formatted(
-                resumo.dataGeracao(),
-                resumo.totalAvaliacoes(),
-                resumo.mediaNotas(),
-                resumo.criticas(),
-                resumo.medias(),
-                resumo.baixas()
-        );
+        relatorio.append("Período: ")
+                .append(resumo.dataGeracao().minusDays(7))
+                .append(" até ")
+                .append(resumo.dataGeracao())
+                .append("\n");
+
+        relatorio.append("Data de geração: ")
+                .append(resumo.dataGeracao())
+                .append("\n");
+
+        relatorio.append("Total de avaliações: ")
+                .append(resumo.totalAvaliacoes())
+                .append("\n");
+
+        relatorio.append("Média das notas: ")
+                .append(String.format("%.2f", resumo.mediaNotas()))
+                .append("\n\n");
+
+        relatorio.append("QUANTIDADE POR URGÊNCIA\n");
+        relatorio.append("- Críticas: ")
+                .append(resumo.criticas())
+                .append("\n");
+
+        relatorio.append("- Médias: ")
+                .append(resumo.medias())
+                .append("\n");
+
+        relatorio.append("- Baixas: ")
+                .append(resumo.baixas())
+                .append("\n\n");
+
+        relatorio.append("QUANTIDADE DE AVALIAÇÕES POR DIA\n");
+
+        if (resumo.quantidadePorDia().isEmpty()) {
+            relatorio.append("- Nenhuma avaliação no período\n");
+        } else {
+            resumo.quantidadePorDia().forEach((dia, quantidade) ->
+                    relatorio.append("- ")
+                            .append(dia)
+                            .append(": ")
+                            .append(quantidade)
+                            .append("\n")
+            );
+        }
+
+        relatorio.append("\nDETALHES DAS AVALIAÇÕES\n");
+
+        if (resumo.avaliacoes().isEmpty()) {
+            relatorio.append("Nenhuma avaliação encontrada no período.\n");
+        } else {
+            for (AvaliacaoDetalhe avaliacao : resumo.avaliacoes()) {
+                relatorio.append("\n------------------------------\n");
+
+                relatorio.append("Descrição: ")
+                        .append(avaliacao.descricao())
+                        .append("\n");
+
+                relatorio.append("Nota: ")
+                        .append(avaliacao.nota())
+                        .append("\n");
+
+                relatorio.append("Urgência: ")
+                        .append(avaliacao.urgencia())
+                        .append("\n");
+
+                relatorio.append("Data de envio: ")
+                        .append(avaliacao.dataEnvio())
+                        .append("\n");
+            }
+        }
+
+        return relatorio.toString();
     }
 
     private String montarNomeArquivo(OffsetDateTime dataGeracao) {
-        return "relatorios/relatorio-" +
-                dataGeracao.toLocalDate() +
-                ".txt";
+        return "relatorios/relatorio-semanal-"
+                + dataGeracao.toLocalDate()
+                + ".txt";
     }
 
     private void salvarNoS3(String nomeArquivo, String conteudo) {

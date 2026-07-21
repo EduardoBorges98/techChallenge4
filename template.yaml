@@ -89,6 +89,12 @@ Resources:
             Path: /avaliacoes
             Method: post
 
+        ReceberAvaliacaoApiAlternativa:
+          Type: Api
+          Properties:
+            Path: /avaliacao
+            Method: post
+
   GerarRelatorioFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -165,8 +171,12 @@ Resources:
 Outputs:
 
   AvaliacaoApiUrl:
-    Description: Endpoint para envio de avaliações
+    Description: Endpoint principal para envio de avaliações
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/avaliacoes"
+
+  AvaliacaoApiAlternativaUrl:
+    Description: Endpoint alternativo compatível com o enunciado
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/avaliacao"
 
   AvaliacoesTableName:
     Description: Nome da tabela de avaliações
