@@ -10,9 +10,6 @@ region = "sa-east-1"
 cached = true
 parallel = true
 
-[default.validate.parameters]
-lint = true
-
 [default.deploy.parameters]
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
