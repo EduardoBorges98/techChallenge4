@@ -45,6 +45,11 @@ jobs:
       - name: Validar template
         run: sam validate
 
+      - name: Executar testes automatizados
+        run: |
+          mvn -f ReceberAvaliacaoFunction/pom.xml test
+          mvn -f GerarRelatorioFunction/pom.xml test
+
       - name: Compilar aplicação
         run: sam build
 
